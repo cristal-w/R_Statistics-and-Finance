@@ -3,7 +3,7 @@ This is repo for personal R practices in Statistics and Finance field. Sources a
 
 ## Content Summary
 
-| Topic                                                                 | Link to PDF                                                                 |
+| Topic                                                                 | R code (Link to PDF)                                                                 |
 |-----------------------------------------------------------------------|------------------------------------------------------------------------------|
 | 1. Financial Data & Returns                                           | [1_Financial-Data-and-Returns.pdf](1_Financial-Data-and-Returns.pdf)         |
 | 2. Univariate Return Modeling                                         | [2_Univariate Return Modeling.pdf](2_Univariate%20Return%20Modeling.pdf)     |
