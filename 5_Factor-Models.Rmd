@@ -1,0 +1,608 @@
+---
+title: "Factor Models"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    self_contained: true
+editor_options:
+  chunk_output_type: inline
+  markdown: 
+    wrap: 72
+---
+
+This is sourced from STAD70 course practice questions and sample R code
+taught by professor Sotos. If you have any questions/concerns/comments
+feel free to email me:
+[cristal.wang111\@gmail.com](mailto:cristal.wang111@gmail.com){.email}.
+
+# 1.Regression - Mutual Funds Sector Attribution and Performance Analysis
+
+For this problem you will use regression to identify the composition of
+various mutual funds.
+
+## 1.1.Data and Return for Mutual Funds
+
+Download the adjusted daily closing prices from Jan 1 2020 to Dec 31
+2022 for the 5 mutual funds below (use `tseries::get.hist.quote()` for
+each ticker):
+
+-   FCNTX: Fidelity Contrafund
+
+-   PIODX: Pioneer A
+
+-   AIVSX: American Funds Invmt Co of Amer A
+
+-   PRBLX: Parnassus Core Equity Investor
+
+-   VFIAX: Vanguard 500 Index Admiral
+
+Note that each of these funds has at least 90% of their weight in the US
+stocks market. You can actually check the composition of the investment
+over different stock sectors from Yahoo Finance, under the fund’s
+holdings tab; e.g. for FCNTX at
+<https://finance.yahoo.com/quote/FCNTX/holdings>.
+
+```{r,warning=FALSE}
+library(zoo)
+library(tseries)
+
+MF.names=c('FCNTX','PIODX','AIVSX','PRBLX','VFIAX')
+N.MF=length(MF.names)
+S=list()
+for(i in 1:N.MF){
+  S[[i]]=get.hist.quote(MF.names[i], start='2022-01-01', end='2022-12-31', quote='AdjClose', quiet = TRUE)
+}
+R=lapply(S, FUN = function(x){ diff(x) /lag(x,-1) }) # MF net returns
+logReturn = lapply(S, FUN = function(x){ diff(log(x)) })
+RY=matrix(unlist(R),ncol=N.MF) # bind returns in a matrix
+colnames(RY)=MF.names
+```
+
+-   **`lapply(...)`**: Applies the function to each time series of
+    prices in list **`S`**.
+
+-   **`diff(x)`**: Calculates the difference between consecutive days
+    (i.e., $P_t$ - $P_{t-1}$).
+
+-   **`lag(x, -1)`**: Shifts the prices forward by one time unit, i.e.
+    $P_{t-1}$
+
+-   MF net returns: $Return_t = \frac{P_t - P_{t-1}}{P_{t-1}}$
+
+-   `diff(log(x))`: Computes the difference of log prices, which gives
+    you:
+
+    $LogReturn_{t} = r_t = log⁡(P_{t})−log⁡(P_{t−1})=\log\left(\frac{P_t}{P_{t-1}}\right) = log(1+R_{t})$
+
+## 1.2.Regression - Sector Attribution on Sector ETFs
+
+Assume you do not have any information about the investment strategy of
+the funds. Download the daily prices and calculate returns of the
+following EFTs, which track different sectors of the economy:
+
+-   XLB: Basic Materials \| XLY: Consumer Cyclical \| XLF: Financial
+    Services \| VNQ: Real Estate \|
+
+    XLP: Consumer Defensive \| XLV: Healthcare \| XLU: Utilities \| XTL:
+    Communication Services \|
+
+    XLE: Energy \| XLI: Industrials \| XLK: Technology
+
+Regress each of the mutual fund returns on the above ETF returns and
+create barplots of the estimated beta coefficients. Do these accurately
+reflect the allocation over the different sectors (as described in Yahoo
+Finance)?
+
+```{r}
+ETF.names=c('XLB','XLY','XLF','VNQ','XLP','XLV','XLU','XTL','XLE','XLI','XLK')
+sectors = c("Basic Materials","Consumer Cyclical","Financial Services",
+            "Real Estate","Consumer Defensive", "Healthcare", "Utilities", 
+            "Communication Services", "Energy", "Industrials", "Technology")
+N.ETF=length(ETF.names)
+S=list()
+for(i in 1:N.ETF){
+  S[[i]]=get.hist.quote(ETF.names[i], start='2022-01-01',                        end='2022-12-31', quote='AdjClose', quiet = TRUE)
+}
+R=lapply(S, FUN = function(x){ diff(x) / lag(x,-1) }) # calculate ETF returns
+logReturn = lapply(S, FUN = function(x){ diff(log(x)) })
+RX=matrix(unlist(R),ncol=N.ETF) # bind returns in a matrix
+colnames(RX)=ETF.names
+
+out=list(); 
+for(i in 1:N.MF){
+  out[[i]]=lm(RY[,i] ~ RX)
+  weights = out[[i]]$coef[-1] 
+  barplot( rev(weights), names.arg = rev(sectors), main = MF.names[i],
+          horiz = TRUE, las = 2, cex.names = .8)
+}
+```
+
+The barplots of the regression coefficients (betas) **roughly** follow
+the sector weightings for each fund. Nevertheless, they are not always
+close in actual value (e.g. in some cases the betas are negative, even
+though weightings are positive). The differences can be due to the fact
+that we use ETFs as *proxies* for a sector, but the actual holding of
+the fund within the sector might be different. Moreover, there will be
+estimation error in our regression model, which is only based on the
+last year's returns.
+
+Nevertheless, it is quite impressing that we can (approximately)
+identify the strategy of a fund, without knowing anything beyond its
+past returns. This approach works because of the linear formula for net
+portfolio returns: $$ R_p = w_1 R_1 + \cdots + w_N R_N$$ Regressing
+portfolio returns on other assets, we can estimate the weights, assuming
+the portfolio composition is constant.
+
+## 1.3.Jensen's Alpha and Fund Performance
+
+Compare the performance of the mutual funds to that of a portfolio of
+ETFs by reporting the value of **Jensen’s alpha** (based on the
+regressions from the previous part) and its corresponding **p-value**.
+
+```{r}
+alpha=p.val=rep(0,N.MF)
+for(i in 1:N.MF){
+  alpha[i]=out[[i]]$coefficients[1]*250 # annualized Jensen alpha
+  p.val[i]=summary(out[[i]])$coefficients[1,4]
+}
+cbind(alpha, p.val)
+```
+
+All the funds' alphas are negative, although their p-values are not very
+small. A likely cause for this is that funds charge a *fee* which
+consistently eats up some of the returns of their constituent assets.
+ETFs have typically lower fees than mutual funds, but our regression
+does not account for **transaction costs** (it is more costly to buy
+multiple assets than a single one), so the comparison is more nuanced.
+
+Note that you can find Jensen alphas and other performance measures
+(e.g., Sharpe & Treynor Ratios) for assets in Yahoo! Finance under the
+[risk tab](https://finance.yahoo.com/quote/FCNTX/risk?p=FCNTX). These
+metrics are based on the CAPM/Market factor model, by regressing the
+asset's returns on a proxy for the market return (e.g., S&P500).
+
+# 2.Factor Analysis and Simulation
+
+Use the following R code to download daily prices of 10 ETFs, from Jan
+1, 2018 to Dec 31, 2019.
+
+```{r}
+library(zoo)
+library(tseries)
+tickers = c("DVEM", "EXT", "HYEM", "LTPZ", "SCHP", 
+            "EDV",  "SPMB", "TLT", "GOVT")
+S=list()
+for(i in 1:length(tickers)){
+  S[[i]] = get.hist.quote(tickers[i], start='2018-01-01', end='2019-12-31', quote='AdjClose', drop = TRUE)  
+}
+
+```
+
+## 2.1.Return, LogReturn and plot
+
+Calculate the log-returns of the ETFs, and plot the price and return
+series for the first ETF (DVEM)
+
+```{r}
+r = lapply(S, FUN=function(x){diff(log(x))}) 
+R = lapply(r, FUN=function(x){exp(x)-1}) 
+
+plot(S[[1]])
+plot(R[[1]])
+
+```
+
+## 2.2.Fact Analysis
+
+Use `factanal()` to fit a 2-factor model to the correlation matrix of
+the returns. Report the factor loadings and idiosyncratic variances of
+you model.
+
+```{r}
+
+Rmat = simplify2array(R) # Simplify list of matrices into a single array
+fmod = factanal( Rmat, factors = 2,  lower = 0.005)
+
+( b = fmod$loadings )
+( v = fmod$uniquenesses )
+```
+
+Or can do :
+
+```{r}
+
+RX=matrix(unlist(R),ncol=length(tickers))
+fact = factanal(RX, factors = 2, rotation = "none")
+#print(fact)
+```
+
+## 2.3.Multivariate normal simulation using Factor-model correlations
+
+Simulate 250 daily log-returns using a **multivariate Normal
+distribution** with parameters given by the sample means and variances
+of the ETFs, and **correlation matrix given by the previous factor
+model**. Calculate and plot the cumulative net-returns of an equally
+weighted portfolio over the 10 ETFs.
+
+```{r}
+MU = sapply(R, mean)
+SD = sapply(R, sd)
+VC = ( b%*%t(b) + diag(v) ) * (SD %*% t(SD)) 
+
+library(mvtnorm)
+Rsim = mvtnorm::rmvnorm(250, MU, VC)
+
+R_eqwt = rowMeans( exp( apply(Rsim,2,cumsum) ) - 1 )
+plot(R_eqwt, type = "l");
+```
+
+# 3.Factor Models of Asset Returns
+
+In this section, we will start with the **one-factor CAPM model** of
+Chap. 17 and then extend this model to the **three-factor Fama–French
+model**.
+
+-   We will use the dataset Stock_Bond_2004_to_2005.csv on the book’s
+    website, which contains stock prices and other financial time series
+    for the years 2004 and 2005. Data on the Fama–French factors are
+    available at Prof. Kenneth French’s website, where `RF` is the
+    **risk-free rate** and `Mkt.RF`, `SMB`,and `HML` are the
+    **Fama–French factors.**
+
+Go to Prof. French’s website and get the daily values of `RF`, `Mkt.RF`,
+`SMB`, and `HML` for the years 2004–2005. It is assumed here that you’ve
+put the data in a text file FamaFrenchDaily.txt. Returns on this website
+are expressed as **percentages**.
+
+## Model 1: One-Factor CAPM
+
+Now fit the CAPM to the four stocks using the `lm` command. This code
+fits a linear regression model separately to the four responses. In each
+case, the independent variable is `Mkt.RF`.
+
+We apply a linear regression model where excess returns of four selected
+stocks (GM, Ford, UTX, Merck) are regressed on the market excess return
+(`Mkt.RF`).
+
+```{r,warning=FALSE}
+# Uses daily data 2004-2005
+stocks = read.csv("Stock_FX_Bond_2004_to_2005.csv",header=T)
+attach(stocks)
+
+FF_data = read.table("FamaFrenchDaily.txt", header = TRUE)
+FF_data = FF_data[-1, ] # delete first row since stocks_diff
+
+stocks_subset = as.data.frame(cbind(GM_AC, F_AC, UTX_AC, MRK_AC))
+# Calculating Log Returns and Differencing
+stocks_diff = as.data.frame(100 * apply(log(stocks_subset),2, diff)- FF_data$RF)
+names(stocks_diff) = c("GM", "Ford", "UTX", "Merck")
+
+
+# lost a row due to differencing
+fit1 = lm(as.matrix(stocks_diff) ~ FF_data$Mkt.RF)
+summary(fit1)
+```
+
+### (a).Testing Intercepts
+
+The CAPM predicts that all four intercepts will be zero. For each stock,
+using α =0.025, can you accept the null hypothesis that its intercept is
+zero? Why or why not? Include the p-values with your work.
+
+-   The intercepts p-value is below 0.025 for General motors (GM) and
+    Ford, but not for United Technologies Incorporatted (UTX) and Merck.
+    Of course, a p-value only shows statistical significance, not the
+    size of an effect.
+
+-   However, estimated intercepts for GM and Ford are -0.23 and -0.18
+    and these are reasonably large in magnitude. Since they are
+    negative, this suggests than these two stocks were overpriced.
+
+### (b).Residual Correlations
+
+The CAPM also predicts that the four sets of residuals will be
+uncorrelated. What is the correlation matrix of the residuals? Give a
+95% confidence interval for each of the six correlations. Can you accept
+the hypothesis that all six correlations are zero?
+
+-   The correlation matrix is below. All correlations are reasonably
+    close to 0 (less than 0.1 in magnitude) except the correlation
+    between GM and Ford residuals.
+
+-   That correlation is 0.52 and has a very small p-value. The
+    correlation between GM and Merck residuals is -0.0878 and is
+    statistically significant at 0.05 but might be too small to be of
+    practical significance.
+
+```{r}
+cor(residuals(fit1)) 
+res = residuals(fit1)
+cor.test(res[,"GM"],res[,"Ford"])
+cor.test(res[,"GM"],res[,"UTX"])
+cor.test(res[,"GM"],res[,"Merck"])
+cor.test(res[,"Ford"],res[,"UTX"])
+cor.test(res[,"Ford"],res[,"Merck"])
+cor.test(res[,"UTX"],res[,"Merck"])
+
+```
+
+### (c).Covariance Matrix CAPM Estimation
+
+Regardless of your answer to Problem 6, assume for now that the
+residuals are **uncorrelated**. Then use the CAPM to estimate the
+**covariance matrix** of the excess returns on the four stocks. Compare
+this estimate with the **sample covariance matrix** of the excess
+returns. Do you see any large discrepancies between the two estimates of
+the covariance matrix?
+
+-   We see below that the estimated covariance matrix using the CAPM is
+    similar to the sample covariance matrix, with the exception of the
+    covariance between GM and Ford. Since these two stocks have a high
+    residual correlation and the CAPM assumes that the residual
+    correlation is 0, it is not surprising that the CAPM estimated
+    covariance matrix severely underestimates the correlation between GM
+    and Ford.
+
+```{r}
+attach(FF_data)
+sigF = var(Mkt.RF)
+bbeta = as.matrix(fit1$coef)
+bbeta = bbeta[-1,] # delete intercepts so bbeta has the four slopes
+n=dim(stocks_diff)[1]
+sigeps = as.matrix((var(as.matrix(res))))
+
+sigeps_ind = diag(as.matrix(sigeps))
+sigeps_ind = diag(sigeps_ind,nrow=4)
+cov_equities = sigF* bbeta %*% t(bbeta) + sigeps_ind
+cov_equities
+cov(stocks_diff)
+
+```
+
+If use the true residual correlation.
+
+```{r}
+bbeta_mat <- matrix(bbeta, nrow = 1)
+cov_equities = t(bbeta_mat) %*% sigF %*% (bbeta_mat) + sigeps_ind
+cov_equities
+cov(stocks_diff)
+
+```
+
+------------------------------------------------------------------------
+
+## Model 2: Fama–French Three-Factor Model
+
+Next, you will fit the Fama–French three-factor model. Run the following
+R code, which is much like the previous code except that the regression
+model has two additional predictor variables, SMB and HML.
+
+```{r}
+fit2 = lm(as.matrix(stocks_diff) ~ FF_data$Mkt.RF +
+FF_data$SMB + FF_data$HML)
+summary(fit2)
+
+```
+
+### (a).Testing Additional Factor Relevance
+
+The CAPM predicts that for each stock, the slope (beta) for SMB and HML
+will be zero. Explain why the CAPM makes this prediction. Do you accept
+this null hypothesis? Why or why not?
+
+(NO SOLUTION)
+
+### (b).Residual Correlations
+
+If the Fama–French model explains all covariances between the returns,
+then the correlation matrix of the residuals should be diagonal. What is
+the estimated correlations matrix? Would you accept the hypothesis that
+the correlations are all zero?
+
+(NO SOLUTION)
+
+```{r}
+cor(residuals(fit2)) 
+res = residuals(fit2)
+cor.test(res[,"GM"],res[,"Ford"])
+cor.test(res[,"GM"],res[,"UTX"])
+# cor.test(res[,"GM"],res[,"Merck"])
+# cor.test(res[,"Ford"],res[,"UTX"])
+# cor.test(res[,"Ford"],res[,"Merck"])
+# cor.test(res[,"UTX"],res[,"Merck"])
+```
+
+### (c).Model Comparison CAPM vs Fama-French
+
+Which model, CAPM or Fama–French, has the smaller value (better) of AIC?
+Which has the smaller value of BIC? What do you conclude from this?
+
+(NO SOLUTION)
+
+The `AIC()` and `BIC()` functions need models with a **single response**
+(like just `y ~ x`). For multivariate models, `logLik()` (which AIC/BIC
+rely on) isn't defined by default.
+
+```{r}
+fit_AICBIC=fit1
+# Residual Sum of Squares
+rss <- sum(residuals(fit_AICBIC)^2)
+
+# Number of observations and parameters
+n=dim(stocks_diff)[1]
+k <- length(coef(fit_AICBIC))  # or use length(fit$coefficients) * number of responses
+
+# AIC and BIC (based on Gaussian likelihood approximation)
+(aic <- n * log(rss / n) + 2 * k)
+(bic <- n * log(rss / n) + log(n) * k)
+
+```
+
+### (d).Covariance Matrix
+
+#### Factor Covariance Matrix
+
+What is the covariance matrix of the three Fama–French factors?
+
+```{r}
+#attach(FF_data)
+SIGMA_F = cov(FF_data[,c(2,3,4)])
+SIGMA_F
+```
+
+#### Covariance Matrix of Return - by Fama–French Model
+
+```{r}
+fit2 = lm(as.matrix(stocks_diff) ~ FF_data$Mkt.RF+FF_data$SMB + FF_data$HML)
+# summary(fit2)
+
+```
+
+```{r}
+res = residuals(fit2)
+
+FF3=FF_data[,c(2,3,4)]
+SIGMA_F = cov(FF3)
+bbeta = as.matrix(fit2$coef)
+bbeta = bbeta[-1,] # delete intercepts so bbeta has the four slopes
+n=dim(stocks_diff)[1]
+sigeps = as.matrix((var(as.matrix(res))))
+sigeps_ind = diag(as.matrix(sigeps))
+sigeps_ind = diag(sigeps_ind,nrow=4)
+cov_equities_indeps = t(bbeta) %*% SIGMA_F %*% (bbeta) + sigeps_ind
+
+cov_equities = t(bbeta) %*% SIGMA_F %*%(bbeta) + sigeps
+cov_equities_indeps;cov_equities;cov(stocks_diff)
+```
+
+### (e).Predicting Variance and Covariance for New Stocks
+
+In this problem, Stocks 1 and 2 are two stocks, not necessarily in the
+Stock_FX_Bond_2004_to_2005.csv data set. Suppose that Stock 1 has betas
+of 0.5,0.4,and −0.1 with respect to the three factors in the Fama–French
+model and a residual variance of 23.0. Suppose also that Stock 2 has
+betas of 0.6, 0.15, and 0.7 with respect to the three factors and a
+residual variance of 37.0. Regardless of your answer to Problem 9, when
+doing this problem, assume that the three factors do account for all
+covariances.
+
+(a) Use the Fama–French model to estimate the variance of the excess
+    return on Stock 1.
+
+    ```{r}
+    # factor covariance matrix
+    Sigma_F <- cov(FF_data[,3:5],FF_data[,3:5])  # columns: Mkt.RF, SMB, HML
+
+
+    # Define betas and residual variance
+    beta1 <- c(0.5, 0.4, -0.1)
+    resid_var1 <- 23.0
+
+
+    # Calculate the factor-related variance
+    var_factor <- t(beta1) %*% Sigma_F %*% beta1
+
+    # Total variance
+    (var_stock1 <- var_factor + resid_var1)
+
+    ```
+
+(b) Use the Fama–French model to estimate the variance of the excess
+    return on Stock 2. And use the Fama–French model to estimate the
+    covariance between the excess returns on Stock 1 and Stock 2.
+
+    ```{r}
+    # Define betas for Stock 2 and residual variance
+    beta2 <- c(0.6, 0.15, 0.7)
+    resid_var2 <- 37.0
+
+    # Calculate the variance for Stock 2
+    var_factor2 <- t(beta2) %*% Sigma_F %*% beta2
+    (var_stock2 <- var_factor2 + resid_var2)
+
+    # Calculate the covariance between Stock 1 and Stock 2
+    (cov12 <- t(beta1) %*% Sigma_F %*% beta2)
+
+    ```
+
+(NO SOLUTION)
+
+------------------------------------------------------------------------
+
+## Model 3: Statistical Factor Analysis
+
+This section applies statistical factor analysis to the log returns of
+10 stocks in the data set Stock_FX_Bond.csv. The data set contains
+adjusted closing (AC) prices of the stocks, as well as daily volumes and
+other information that we will not use here.
+
+### (a).Exploratory Factor Modeling
+
+The following R code will read the data, compute the log returns, and
+fit a two-factor model. Note that `factanal` works with the correlation
+matrix or, equivalently, with standardized variables.
+
+```{r}
+dat = read.csv("Stock_FX_Bond.csv")
+stocks_ac = dat[ , c(3, 5, 7, 9, 11, 13, 15, 17)]
+n = length(stocks_ac[ , 1])
+stocks_returns = log(stocks_ac[-1, ] / stocks_ac[-n, ])
+
+fact = factanal(stocks_returns, factors = 2, rotation = "none")
+print(fact)
+```
+
+Loadings less than the parameter cutoff are not printed. The default
+value of cutoff is 0.1, but you can change it as in
+`print(fact,cutoff = 0.01)` or `print(fact, cutoff = 0)`.
+
+### (b).Interpreting Factor Loadings
+
+What are the factor loadings? What are the variances of the unique risks
+for Ford and General Motors?
+
+-   The factor loadings and uniqueness are in the output below. We see
+    that the uniquenesses for Ford and GM are 0.423 and 0.399,
+    respectively.
+
+### (c).Number of Factors Needed
+
+Does the likelihood ratio test suggest that two factors are enough? If
+not, what is the minimum number of factors that seems sufficient?
+
+-   The results of the likelihood ratio tests below strongly suggest
+    that there are more than two factors. It seems that 4 factors are
+    sufficient, but not 3.
+
+```         
+Test of the hypothesis that 2 factors are sufficient.
+The chi square statistic is 564.66 on 13 degrees of freedom.
+The p-value is 2.6e-112
+
+Test of the hypothesis that 3 factors are sufficient.
+The chi square statistic is 162.29 on 7 degrees of freedom.
+The p-value is 1.06e-31
+
+Test of the hypothesis that 4 factors are sufficient.
+The chi square statistic is 0.3 on 2 degrees of freedom.
+The p-value is 0.86 
+```
+
+### (d).Estimating Correlations from Factor Model
+
+Regardless of your answer to Problem, use the two-factor model to
+estimate the correlation of the log returns for Ford and IBM.
+
+The output below contains the **estimated correlation matrix using the
+factor model** after line 4. For comparison, the **sample correlation
+matrix** is also printed.
+
+```{r}
+loadings = matrix(as.numeric(loadings(fact)), ncol = 2)
+unique = as.numeric(fact$unique)
+options(digits=2)
+loadings %*% t(loadings) + diag(unique)
+cor(stocks_returns)
+```
