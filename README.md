@@ -7,7 +7,7 @@ This is repo for personal R practices in Statistics and Finance field. Sources a
 |-----------------------------------------------------------------------|------------------------------------------------------------------------------|
 | 1. Financial Data & Returns                                           | [1_Financial-Data-and-Returns.pdf](1_Financial-Data-and-Returns.pdf)         |
 | 2. Univariate Return Modeling                                         | [2_Univariate Return Modeling.pdf](2_Univariate%20Return%20Modeling.pdf)     |
-| 3. Multivariate Return Modelling and Copulas                         | [3.1_Multivariate-Return-Modelling-Copulas.pdf](3.1_Multivariate-Return-Modelling-Copulas.pdf),& [3.2_Multivariate-Return-Modelling&Copulas-2.pdf](3.2_Multivariate-Return-Modelling&Copulas-2.pdf) |
+| 3. Multivariate Return Modelling and Copulas                         | [3.1_Multivariate-Return-Modelling-Copulas.pdf](3.1_Multivariate-Return-Modelling-Copulas.pdf),<br> [3.2_Multivariate-Return-Modelling&Copulas-2.pdf](3.2_Multivariate-Return-Modelling&Copulas-2.pdf) |
 | 4. Portfolio Theory                                                  | [4.Portfolio-Theory.pdf](4.Portfolio-Theory.pdf)                             |
 | 5. Factor Models                                                     | [5_Factor-Model.pdf](5_Factor-Model.pdf)                                     |
 | 6. Risk Management                                                   | [6_Risk-Management.pdf](6_Risk-Management.pdf)                               |
