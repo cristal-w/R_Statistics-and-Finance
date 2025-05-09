@@ -1,0 +1,558 @@
+---
+title: "4.Portfolio Theory"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    self_contained: true
+editor_options:
+  chunk_output_type: inline
+  markdown: 
+    wrap: 72
+---
+
+This is sourced from STAD70 course practice questions and sample R code
+taught by professor Sotos. If you have any questions/concerns/comments
+feel free to email me:
+[cristal.wang111\@gmail.com](mailto:cristal.wang111@gmail.com){.email}.
+
+# 1.Efficient Equity Portfolios
+
+This section uses daily stock prices in the data set `Stock_Bond.csv`
+that is posted on the book’s website.
+
+Variable name ends with “AC” is an adjusted closing price. As the name
+suggests, these prices have been adjusted for dividends and stock
+splits, so that returns can be calculated without further adjustments.
+
+-   Run the following code, which will read the data, compute the
+    returns for six stocks, create a scatterplot matrix of these
+    returns, and compute the mean vector, covariance matrix, and vector
+    of standard deviations of the returns.
+
+-   Note that returns will be percentages.
+
+    -   `prices[2:n, ]`: These are the prices from **day 2 to the last
+        day** (i.e., the "current day").
+
+    -   `prices[1:(n-1), ]`: These are the prices from **day 1 to the
+        second-last day** (i.e., the "previous day").
+
+    -   `prices[2:n, ] / prices[1:(n-1), ]`: This divides each day’s
+        price by the previous day’s price to get the relative change.
+
+        -   For example: if GM's price was \$100 yesterday and \$105
+            today, this becomes 105/100 = 1.05
+
+    -   ...`- 1`: This gives you the daily return as a decimal.
+
+        -   Continuing our example: 1.05 - 1 = 0.05 → 5% return.
+
+    <!-- -->
+
+    -   `100 * (...)`: Converts the return into a **percentage**. 0.05
+        becomes 5%
+
+```{r}
+dat = read.csv("Stock_Bond.csv", header = TRUE)
+
+prices = cbind(dat$GM_AC, dat$F_AC, dat$CAT_AC, dat$UTX_AC,
+               dat$MRK_AC, dat$IBM_AC)
+
+n = dim(prices)[1]
+returns = 100 * (prices[2:n, ] / prices[1:(n-1), ] - 1)
+
+pairs(returns)
+
+mean_vect = colMeans(returns)
+cov_mat = cov(returns)
+sd_vect = sqrt(diag(cov_mat))
+```
+
+## 1.1.Efficient Frontier and Optimal Portfolios under Constraints
+
+Write an R program to find the **efficient frontier, the tangency
+portfolio, and the minimum variance portfolio**, and plot on
+“reward-risk space” the location of each of the six stocks, the
+efficient frontier, the tangency portfolio, and the line of efficient
+portfolios.
+
+-   Use the constraints that $−0.1 ≤ w_j ≤ 0.5$ for each stock.
+
+    -   The first constraint limits short sales but does not rule them
+        out completely. The second constraint prohibits more than 50% of
+        the investment in any single stock.
+
+-   Assume that the annual risk-free rate is 3% and convert this to a
+    daily rate by dividing by 365, since interest is earned on trading
+    as well as non-trading days.
+
+    -   `rf_annual = 3`: Annual risk-free rate (3%); Use 3 as Returns
+        here has unit of percentages.
+
+        Recall `returns = 100 * (prices[2:n, ] / prices[1:(n-1), ] - 1)`
+
+The last few lines of code produce a legend. You were not expected to
+include a legend on your own plot, but you can use this example in the
+future when you are asked to provide a legend.
+
+```{r}
+## 0.INPUT
+A = -0.1  # lower bound for weights
+B = 0.5   # upper bound for weights
+rf_annual = 3  # Annual risk-free rate (3%)
+rf_used = rf_annual / 365  # Convert annual risk-free rate to daily rate
+
+# Set - range of target portfolio returns
+target_return_range = c(0.05, 0.08)  # lower and upper bounds for target returns
+num_target_returns = 300  # Number of target returns to generate
+```
+
+```{r}
+## 1.Initialization:
+rf_daily = rf_used
+M = length(mean_vect) # number of assets in the portfolio 
+library(quadprog)
+
+## 1.1.Constraint Matrix Setup:
+Amat = cbind(rep(1, M), mean_vect, diag(1, nrow = M), -diag(1, nrow = M))
+
+## 1.2.Portfolio return target range
+muP = seq(target_return_range[1], target_return_range[2], length = num_target_returns)  # Create the range of target portfolio returns
+sdP = muP  # Initially mirrors muP (will store actual standard deviations later)
+weights = matrix(0, nrow = num_target_returns, ncol = M)  # Matrix to store the portfolio weights for each target return
+
+## 2.Solve the optimization problem for each portfolio return target
+for (i in 1:length(muP)) {
+  bvec = c(1, muP[i], rep(A, M), rep(-B, M))  # Updated bounds for weights
+  result = solve.QP(Dmat = cov_mat, dvec = rep(0, M), Amat = Amat,
+                    bvec = bvec, meq = 2)
+  sdP[i] = sqrt(2 * result$value)
+  weights[i, ] = result$solution
+}
+
+## 3.Calculate Sharpe ratios and identify the tangency portfolio
+sharpe = (muP - rf_daily) / sdP
+ind = (sharpe == max(sharpe))  # locates the tangency portfolio
+weights_portfolio = weights[ind, ]  # weights of the tangency portfolio
+
+print(paste("Max Sharpe ratios:",  max(sharpe)))
+print(paste("weights of tangency portfolio:", weights_portfolio))
+```
+
+-   `muP = seq(0.05, 0.08, length = 300)`: This creates a sequence of
+    300 portfolio return target values ranging from 5% to 8%. These are
+    the expected returns for the portfolios you will be optimizing.
+
+```{r}
+
+## Plot the efficient frontier
+plot(sdP, muP, type = "l", xlim = c(0, 2.5), ylim = c(0, 0.1))
+
+# Plot the risk-free asset point (rf_daily)
+points(0, rf_daily, cex = 3, col = "blue", pch = "*")
+
+## Plot the capital market line (CML)
+lines(c(0, sdP[ind]), c(rf_daily, muP[ind]), col = "red", lwd = 3)
+points(sdP[ind], muP[ind], col = "blue", cex = 3, pch = "*")
+
+## Identify the minimum variance portfolio and plot it
+ind2 = (sdP == min(sdP))
+points(sdP[ind2], muP[ind2], col = "green", cex = 3, pch = "*")
+
+## Plot the efficient set of portfolios above the min variance point
+ind3 = (muP > muP[ind2])
+lines(sdP[ind3], muP[ind3], type = "l", xlim = c(0, 0.25), ylim = c(0, 0.3), col = "cyan", lwd = 3)
+
+## Annotate stock labels
+text(sd_vect[1], mean_vect[1], "GM")
+text(sd_vect[2], mean_vect[2], "F")
+text(sd_vect[3], mean_vect[3], "UTX")
+text(sd_vect[4], mean_vect[4], "CAT")
+text(sd_vect[5], mean_vect[5], "MRK")
+text(sd_vect[6], mean_vect[6], "IBM")
+
+
+## Add a legend
+legend("topleft", c("efficient frontier", "efficient portfolios", "tangency portfolio", "min var portfolio"),
+       lty = c(1, 1, NA, NA), lwd = c(3, 3, 1, 1), pch = c("", "", "*", "*"),
+       col = c("cyan", "red", "blue", "green"), pt.cex = c(1, 1, 3, 3))
+
+```
+
+## 1.2.Capital Allocation for Target Return (Using the Constrained Tangency Portfolio)
+
+If an investor wants an efficient portfolio with an expected daily
+return of 0.07%, how should the investor allocate his or her capital to
+the six stocks and to the risk-free asset?
+
+-   Assume that the investor wishes to use the tangency portfolio
+    computed with the constraints $−0.1 ≤ w_j ≤ 0.5$, not the
+    unconstrained tangency portfolio.
+
+-   Let $\omega$ be the weight for the risk-free asset, $\mu_f$ be the
+    risk-free rate, and $\mu_T$ be the expected return of the tangency
+    portfolio. Then $\omega$ solves
+    $0.07 = \omega\mu_f + (1 - \omega)\mu_T$.
+
+The following continuation of the R program computes the weights for the
+six stocks and the risk-free asset. The last line checks that the
+weights sum to 1.
+
+```{r}
+
+expected_daily_return = 0.07
+daily_rf_rate = 3/265
+
+options(digits=3) # Set significant digits to display in R output to 3.
+omega = (expected_daily_return- muP[ind]) / (daily_rf_rate- muP[ind])
+adj_weights_port = (1-omega)*weights[ind]
+
+print(paste("weight of the rf asset (w):", omega))
+print(paste("weight assigned to tangency portfolio (1-w):", 1-omega))
+print("adjusted weights for stocks in portfolio:")
+print((1-omega)*weights[ind])
+
+
+```
+
+We see that the weight for the risk-free asset is 0.054 and the weights
+for the six stocks are -0.08622, -0.00275, 0.31707, 0.36283, 0.30209,
+0.05255. The first two stocks are sold short.
+
+```{r}
+# Check sum should be 1
+omega + sum((1-omega)*weights[ind])
+```
+
+## 1.3.Black Monday in Dataset
+
+Does this data set include Black Monday?
+
+Yes, Black Monday was October 19, 1987 and data go from January 2, 1987
+to Sept 1, 2006. Black Monday is the 202th day in the original data set
+or the 201st day of returns. If you look in the spread sheet you will
+see huge price declines that day. The returns that day were:
+
+```{r}
+returns[201,]
+```
+
+# 2.Portfolio Optimization and Efficient Frontier Analysis
+
+Download monthly adjusted closing prices from Jan 2010 to Dec 2020, for
+the following stocks: (Use
+`tseries::get.hist.quote( ..., compression=’m’)` for monthly data.)
+
+-   ENB.TO (Enbridge Inc.)
+-   CP.TO (Canadian Pacific Railway Ltd.)
+-   RCI-A.TO (Rogers Communications Inc.)
+-   TD.TO (The Toronto-Dominion Bank)
+-   L.TO (Loblaw Companies Ltd.)
+
+Calculate their **net returns** and assume a **monthly interest rate**
+of 0.20% throughout.
+
+```{r}
+library(tseries)
+library(zoo)
+
+tickers = c("ENB.TO","CP.TO","RCI-A.TO","TD.TO","L.TO")
+
+N = length(tickers)
+P=vector("list", N) # list for holding prices
+
+for (i in 1:N) {
+  cat("Downloading ", i, " out of ", N , "\n")
+  P[[i]] = get.hist.quote(instrument = tickers[i], 
+    start = as.Date("2010-01-01"), 
+    end=as.Date("2020-12-01"), 
+    compression="m", quote = "AdjClose", 
+    retclass = "zoo", quiet = T)
+}
+
+# net returns
+R = sapply(P, FUN=function(x){ as.numeric(diff(x) / lag(x, -1)) } )
+colnames(R) = tickers # assign names
+```
+
+## 2.1.Two-Asset Portfolio Risk-Return Analysis Under Varying Correlation
+
+Use only the first two stocks (ENB.TO and CP.TO). Calculate the sample
+means and (individual) sample variances of their returns.
+
+-   Consider the following hypothetical values for their correlation:
+    $\rho = −1, −0.5, 0, +0.5, +1$.
+
+    -   For each value of $\rho$, calculate their corresponding 2D
+        variance-covariance matrix and plot the risk-return profiles of
+        portfolios combining the two assets with weights
+        $[w, (1 − w)], \;\; \forall w \in [−2, 3]$.
+
+    -   Plot all profile curves on the same ($\mu_p,\sigma_p$)-space,
+        using a different color for each value of $\rho$.
+
+```{r}
+## 1.Subset to First Two Assets
+R2=R[,1:2]
+
+## 2.Compute Mean and Standard Deviation of Each Stock’s Returns
+MU = colMeans(R2)
+SD = sqrt(diag(var(R2)))
+
+### 2.1. Cov & Correlation
+print(var(R2)); print(cor(R2));
+print(paste("Real Correlation between Two Assets:",cor(R2)[1,2]))
+```
+
+```{r}
+## 3.Scatter plot the Two Assets on Risk-Return Space
+par(mfrow=c(1,1), mar=c(5, 4, 4, 2) + 0.1)
+plot(SD,MU,pch=16,cex=2, col=2, xlim=c(0,.15), ylim=c(0.005,.025))
+abline(v=0, lty=2); abline(h=0, lty=2) 
+
+## 4.Define Portfolio Weights
+w = seq(-2,+3,.01); W = cbind(w, 1-w)
+
+## 5.Compute Portfolio Mean Returns
+MU.p = W %*% MU
+
+## 6. Loop Over Different Hypothetical Correlation Values
+true_cor = round(cor(R2)[1,2],3)
+rho=c(-1, -.5, 0, true_cor, .5, 1)
+for(i in 1:5){
+  COR=matrix(c(1,rho[i],rho[i],1),2,2)
+  COV= COR * (SD%*%t(SD))
+  SD.p = sqrt(rowSums((W %*% COV)*W)) # portfolio st.dev.
+  lines(SD.p, MU.p, type='l', lwd=2, col=i); 
+}
+
+## 7.Add Points and Labels and Lengend
+points(SD,MU,pch=16,cex=2, col=2); text(SD, MU, pch=16, colnames(R2), pos=c(1,3))
+legend('topright', lwd=rep(2,5),col=1:5, 
+       c("rho=-1","rho=-.5","rho=0",paste("True_rho=",true_cor), "rho=+.5","rho=+1")  )
+```
+
+Note that when the assets are *perfectly* correlated (either positively
+or negatively), the minimum variance portfolio has variance zero.
+
+## 2.2.Multi-Asset Efficient Frontier and Capital Market Line (Unconstrained)
+
+Consider all 5 stocks together now, and use the sample mean and sample
+variance-covariance matrix of their returns.
+
+-   Plot the **efficient frontier** and the **capital market line** on
+    the same ($\mu_p,\sigma_p$)-space and report the **tangency
+    portfolio weights.** Plots the efficient frontier: the set of
+    minimum-risk portfolios for different target returns.
+
+```{r}
+library(quadprog)
+
+## 1.Setup
+COV=cov(R)
+MU=colMeans(R)
+SD=sqrt(diag(COV)) # Standard deviation (risk) of each asset
+N=dim(R)[2] # Number of assets 
+
+## 1.1.Setup for Efficient Frontier
+Amat = cbind(rep(1,N),MU)
+mu.p = seq( -.005, .05,length=100) # Target returns to build efficient frontier
+sd.p = mu.p # Placeholder for standard deviations 
+mu.f = .002 # monthly risk-free interest rate
+
+```
+
+-   `Amat` holds the constraint matrix:
+
+    -   First column (`rep(1,N)`): sum of weights = 1
+
+    -   Second column (`MU`): expected return equals the target return
+
+-   For each target return `mu.p[i]`, solve the following **optimization
+    problem**:
+
+$$ \min_{w} \frac{1}{2} w^T \Sigma w \space \space \space\space subject \space to : \space \sum w_i = 1, \quad \mu^T w = \mu_p $$
+
+-   `W.tang=COV.i%%(MU-mu.f) / sum( COV.i%%(MU-mu.f) )`
+
+    -   This computes the **tangency portfolio** (risky portfolio that
+        maximizes the Sharpe ratio):
+
+    $$ w^* = \frac{\sum^{-1} (\mu - r_f)}{1^T \sum^{-1} (\mu - r_f)} $$
+
+```{r}
+## 2.Plot Assets in Risk-Return Space
+plot(SD, MU, pch=16, cex=1.2, col= 2, xlim=c(0,.1), ylim=c(0,.025))
+abline(v=0, lty=2); abline(h=0, lty=2) 
+text(SD, MU, tickers, cex=1, pos=4) # Labels points with its ticker.
+
+## 3.Compute Efficient Frontier via Quadratic Programming
+for (i in 1:length(mu.p)) 
+{
+  bvec=c(1,mu.p[i]) 
+  out=solve.QP(Dmat=2*COV,dvec=rep(0,N),Amat=Amat,bvec=bvec,meq=2)
+  sd.p[i] = sqrt(out$value) # Minimum portfolio variance(objective function value)
+}
+
+lines(sd.p,mu.p,type="l", lwd=2, col=2) # plot least variance portfolios
+
+## 4.Compute Tangency Portfolio (Maximum Sharpe Ratio)
+COV.i=solve(COV) #inverse of the matrix COV
+W.tang=COV.i%*%(MU-mu.f) / sum( COV.i%*%(MU-mu.f) ) 
+mu.tang=sum(W.tang*MU); sd.tang=sqrt(sum( (COV %*% W.tang) * W.tang ) )
+
+## 5.Plot the Capital Market Line (CML)
+points( sd.tang, mu.tang, pch=15, cex=1.3, col=2)  
+sharpe=(mu.tang-mu.f)/sd.tang
+abline(mu.f,sharpe,lwd=2,lty=2,col=2)
+```
+
+Aside: if want to calculate
+$$ w^{**} = \frac{\sum^{-1} 1}{1^T \sum^{-1} 1} $$
+
+```{r}
+Sigma = var(R) # or cov(R)
+Sigma_inv = solve(Sigma)
+w_mv_starstar = rowSums(Sigma_inv)/sum(Sigma_inv)
+w_mv_starstar
+```
+
+-   **CML**: Capital Market Line that starts at the risk-free rate and
+    goes through the tangency portfolio, with slope equal to the Sharpe
+    ratio: $$\text{CML: } \mu = r_f + \text{Sharpe} \cdot \sigma$$
+
+```{r}
+print(paste("The Sharpe ratio is:",sharpe))
+```
+
+The tangency portfolio weights are:
+
+```{r}
+round( t(W.tang), 4 )
+```
+
+## 2.3.EF,CML with Constraints
+
+Repeat the previous part b. (i.e. plot the **efficient frontier** and
+**capital market line,** and report the **tangency portfolio weights**)
+with the restriction.
+
+-   all weights are within the bounds:
+    $0 \le w_i \le 0.5,\;\; \forall i = 1, \ldots, 5$.
+
+```{r}
+## 1.INPUT - Set Up
+lwb = 0 # lwb <= weights
+upb = 0.5 # weights<= upb
+mu.pot = seq( min(MU), max(MU),length=300) # potential mean returns
+
+
+## 2.Plot Individual Assets
+plot(SD, MU, pch=16, cex=1.2, col= 2,  xlim=c(0,.1), ylim=c(.0,.025))
+abline(v=0, lty=2); abline(h=0, lty=2);text(SD, MU, tickers, cex=1, pos=4)
+
+## 3.Initializations
+Amat = cbind(rep(1,N),MU,diag(1,nrow=N),-diag(1,nrow=N))
+mu.p = NULL # initialize portofio standard error 
+sd.p = NULL # initialize portofio standard error 
+W.p = NULL # initialize portofio weights 
+
+## 4.Loop to Solve QP for Each Target Return
+for (i in 1:length(mu.pot)) 
+{bvec=c(1,mu.pot[i],rep(lwb,N),rep(-upb,N)) # Updated bounds for weights
+  #check whether potential mean return can be achieved with given constraints
+  out=tryCatch( solve.QP(Dmat=2*COV,dvec=rep(0,N),Amat=Amat,bvec=bvec,meq=2), error=function(e) NULL) 
+  #if mean return is achievable, save its st.dev. & portfolio weights
+  if(!is.null(out)){ #  if
+    mu.p=c(mu.p, mu.pot[i]); sd.p=c(sd.p, sqrt(out$value))
+    W.p=rbind(W.p, out$solution)}}
+
+## 5.Plot the Constrained Efficient Frontier
+lines(sd.p,mu.p,type="l", lwd=2, col=2) # plot least variance portfolios
+colnames(W.p)=tickers
+
+## 6.Compute Tangency Portfolio (Max Sharpe Ratio) Under Constraints
+sharpe=( mu.p-mu.f)/sd.p; ind.tang=which.max(sharpe)
+W.tang=W.p[ind.tang,] # weights of tangency portfolio
+sd.tang = sd.p[ind.tang] # st.dev of tangency portfolio
+mu.tang = mu.p[ind.tang] # expected return of tangency portfolio
+
+## 7.Plot Tangency Portfolio and CML
+points( sd.tang, mu.tang, pch=15, cex=1.3, col=2)  
+abline( c(mu.f, sharpe[ind.tang]),lwd=2, col=2, lty=2)
+```
+
+-   The set of feasible portfolios will be a subset of that of the
+    unconstrained problem. Note that the *constrained* efficient
+    frontier is not a parabola any more.
+
+-   But the constrained tangency portfolio is the same as the
+    unconstrained one.
+
+    -   Since the unconstrained tangency portfolio weights were all
+        within [0,0.5], and have (approximately) the same Sharpe ratio
+        `r max(sharpe)`.
+    -   Note that the constrained tangency portfolio weights are
+        (approximately) the same as the unconstrained ones:
+
+```{r}
+max(sharpe)
+```
+
+```{r}
+round( W.tang, 4 )
+```
+
+## 2.4.EF,CML with Constraints ( Not Same Weights)
+
+what if we changed the constraint, to -0.111\<=w1 \<= 0.5101,
+-0.202\<=w2 \<= 0.6201, -1=\<w3\<=1, -0.4\<=w4 \<= 0.8004, -1\<=w5\<=1
+
+```{r}
+## 1.INPUT - Set individual bounds for each asset
+lwb = c(-0.111, -0.202, -1, -0.4, -1)   # lower bounds for w1 to w5
+upb = c(0.5101, 0.6201,  1, 0.8004, 1)  # upper bounds for w1 to w5
+mu.pot = seq( min(MU), max(MU),length=300) # potential mean returns
+
+
+## 2.Plot Individual Assets
+plot(SD, MU, pch=16, cex=1.2, col= 2,  xlim=c(0,.1), ylim=c(.0,.025))
+abline(v=0, lty=2); abline(h=0, lty=2);text(SD, MU, tickers, cex=1, pos=4)
+
+## 3.Initializations
+Amat = cbind(rep(1,N),MU,diag(1,nrow=N),-diag(1,nrow=N)) # here 1 for sum(w)=1, MU for expected return, others for bounds
+mu.p = NULL # initialize portofio standard error 
+sd.p = NULL # initialize portofio standard error 
+W.p = NULL # initialize portofio weights 
+
+## 4.Loop to Solve QP for Each Target Return
+for (i in 1:length(mu.pot)) {
+  bvec = c(1, mu.pot[i], lwb, -upb)  # include your custom bounds here
+  out = tryCatch(solve.QP(Dmat=2*COV, dvec=rep(0,N), Amat=Amat, bvec=bvec, meq=2),
+    error=function(e) NULL)
+  if (!is.null(out)) {
+    mu.p = c(mu.p, mu.pot[i]); sd.p = c(sd.p, sqrt(out$value))
+    W.p = rbind(W.p, out$solution)}}
+
+## 5.Plot the Constrained Efficient Frontier
+lines(sd.p,mu.p,type="l", lwd=2, col=2) # plot least variance portfolios
+colnames(W.p)=tickers
+
+## 6.Compute Tangency Portfolio (Max Sharpe Ratio) Under Constraints
+sharpe=( mu.p-mu.f)/sd.p; ind.tang=which.max(sharpe)
+W.tang=W.p[ind.tang,] # weights of tangency portfolio
+sd.tang = sd.p[ind.tang] # st.dev of tangency portfolio
+mu.tang = mu.p[ind.tang] # expected return of tangency portfolio
+
+## 7.Plot Tangency Portfolio and CML
+points( sd.tang, mu.tang, pch=15, cex=1.3, col=2)  
+abline( c(mu.f, sharpe[ind.tang]),lwd=2, col=2, lty=2)
+```
+
+```{r}
+print(paste("The Max Sharpe ratio is:",max(sharpe)))
+print("constrained tangency portfolio weights:")
+print(round( W.tang, 4 ))
+```
