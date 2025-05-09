@@ -1,0 +1,830 @@
+---
+title: "Simulation: Variance Reduction Techniques"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    self_contained: true
+editor_options:
+  chunk_output_type: inline
+  markdown: 
+    wrap: 72
+---
+
+This is sourced from STAD70 course practice questions and sample R code
+taught by professor Sotos. If you have any questions/concerns/comments
+feel free to email me:
+[cristal.wang111\@gmail.com](mailto:cristal.wang111@gmail.com){.email}.
+
+# 1.Simulation: Variance Reduction Techniques
+
+All these four are unbiased.
+
+## 1.1.Antithetic Variables
+
+**Idea**: For each Normal variate $Z_i$, consider its negative $-Z_i$:
+
+-   Both samples come from the same distribution but are dependent
+
+-   More generally, for Uniform(0,1) use $U_i$ and $1-U_i$
+
+-   Calculate discounted payoff, denoted by $Y$, under both paths:
+    $$ Y_i = f(Z_i), \quad \tilde{Y}_i = f(-Z_i)$$
+
+-   Estimate price as:
+    $$\overline{Y}_{AV} = \frac{1}{2n}\left(\sum_{i=1}^n Y_i + \sum_{i=1}^n \tilde{Y}_i\right) = \frac{1}{n}\sum_{i=1}^n \frac{Y_i + \tilde{Y}_i}{2}$$
+
+    The method balances payoffs of paths with "opposite" returns.
+
+```{r}
+
+# Example for simple European Call
+
+TT=1 # maturity
+S0=K=50 # strike price
+v=.2 # volatility
+r=.03 # risk free rate
+
+N=c(100, 500, 1000, 5000, 10000, 50000, 100000)/2
+
+MC.mean=matrix(0,7,2) # MC estimate
+MC.stde=matrix(0,7,2) # MC standard error
+
+for(i in 1:length(N)){
+  n=N[i]
+  # Simple MC
+  Z=rnorm(2*n)
+  ST=S0*exp( (r-v^2/2)*TT + v*sqrt(TT)*Z )
+  call_payoff=exp(-r*TT)*pmax(ST-K,0);put_payoff=exp(-r*TT)*pmax(K-ST,0)
+  payoff = call_payoff
+  MC.mean[i,1]=mean(payoff) 
+  MC.stde[i,1]=sd(payoff)/sqrt(2*n) 
+  
+  # Antithetic Variables MC
+  Z=rnorm(n); Za=-Z
+  ST=S0*exp( (r-v^2/2)*TT + v*sqrt(TT)*Z )
+  STa=S0*exp( (r-v^2/2)*TT + v*sqrt(TT)*Za )
+  call_payoff=( exp(-r*TT)*pmax(ST-K,0) + exp(-r*TT)*pmax(STa-K,0) )/2
+  put_payoff = ( exp(-r*TT)*pmax(K-ST,0) + exp(-r*TT)*pmax(K-STa,0) )/2
+  payoff = call_payoff
+  MC.mean[i,2]=mean(payoff) 
+  MC.stde[i,2]=sd(payoff)/sqrt(n) 
+}
+MC.mean
+MC.stde
+
+
+# Compare with BSM price 
+BSprice=function(S, X, r, M, v){
+  # arguments: Asset price (S), Strike (X), risk-free rate (r)
+  # Maturity (M), volatility (v)
+  
+  d1 <- (log(S/X)+(r+0.5*v^2)*M)/(v*sqrt(M))
+  d2 <- d1-v*sqrt(M)
+  
+  call.pr= S*pnorm(d1) - X*exp(-r*M)*pnorm(d2)
+  put.pr=X*exp(-r*M) * pnorm(-d2) - S*pnorm(-d1)
+  
+  return(cbind(call.pr,put.pr)) 
+}
+BSprice(S0, K, r, TT, v)
+
+```
+
+**Variance - Antithetic Variables**
+
+-   Simple & general technique, but not always beneficial
+
+-   Only helps if original & antithetic variates are **negatively
+    related**
+
+The variance comparison shows:
+
+$$\begin{align*}
+\text{Var}\left[\overline{Y}_{AV}\right] &< \text{Var}\left[\frac{1}{2n}\sum_{i=1}^{2n} Y_i\right] = \frac{1}{2n}\text{Var}\left(Y_i\right) = \frac{1}{2n}\text{Var}\left[f(Z)\right] \\
+\text{where} \quad \text{Var}\left[\overline{Y}_{AV}\right] &= \frac{1}{2n}\left(\text{Var}\left[Y\right] + \text{Cov}\left(Y_i, \tilde{Y}_i\right)\right)
+\end{align*}$$
+
+This variance is less than or equal to
+$\frac{1}{2n}\text{Var}\left[Y_i\right]$ only if: $$\text{Cov}\left(Y_i,
+\tilde{Y}_i\right) \leq 0 $$
+
+-   The antithetic method provides variance reduction when $f(Z)$ is
+    monotonic; For non-monotonic functions, the covariance may be
+    positive, making the method ineffective
+
+## 1.2.Stratification
+
+-   **Concept**: Split random variable domain into equi-probable strata
+    & draw equal number of variates from within each one
+    -   Example (2 strata): draw equal number of independent $+ve$ and
+        $-ve$ $Z_i$
+-   Stratification ensures equal representation of each stratum in the
+    RV's domain:
+    -   **Always reduces variance** (though sometimes marginally)
+    -   Works best when payoff function $f(Z)$ varies significantly
+        across the domain
+    -   Computationally challenging for multidimensional RVs
+
+**Stratum Definition:**
+
+Consider $m$ equi-probable Normal strata {$A_i$}:
+$P(Z \in A_j) = \frac{1}{m} \quad \text{for} \quad Z \sim N(0,1), \quad j = 1,\ldots,m$
+
+**Stratified Estimator of** $Y = f(Z)$**:**
+
+$$\bar{Y}_{Str} = \frac{1}{m} \sum_{j=1}^m \bar{Y}^{(j)} \text{ where the stratum estimators are: } \bar{Y}^{(j)} = \frac{1}{n} \sum_{i=1}^n f(Z_i^{(j)}) $$
+$$ \text{ with stratified samples: } Z_i^{(j)} \sim^{\text{iid}} N(0,1|Z_i^{(j)} \in A_j), \quad j = 1,\ldots,m$$
+
+-   $\bar{Y}^{(j)}$ estimates the mean within stratum $j$
+-   Final estimator averages across all strata means
+
+```{r}
+# Example for simple European Call
+
+TT=1 # maturity
+S0=K=50 # strike price
+v=.2 # volatility
+r=.03 # risk free rate
+n=10000 # <<--------||
+
+MC.mean=0 # MC estimate
+MC.stde=0 # MC standard error
+
+# Stratification MC for various # of strata
+M=c(1,10,20,50,100,200,500,1000) # <<--------||
+for(i in 1:length(M)){
+  m=M[i]; nj=n/m
+  Z=matrix(0,nj,m)
+  for(j in 1:m){
+    temp=runif(nj,(j-1)/m,j/m)
+    Z[,j]=qnorm(temp)
+  } 
+  ST=S0*exp( (r-v^2/2)*TT + v*sqrt(TT)*Z )
+  payoff=exp(-r*TT)* apply(ST-K,2,pmax,0) # <<--------||
+  MC.mean[i]=mean( colMeans(payoff) )
+  MC.stde[i]=sqrt( sum( apply(payoff,2,var)/nj ) )/m 
+}
+MC.mean
+MC.stde
+```
+
+-   The stratified estimator $\overline{Y}_{Str}$ is an unbiased
+    estimator of $E_m[f(Z)]$.
+-   The stratified estimator always has lower or equal variance compared
+    to the simple Monte Carlo estimator: $$Var[\overline{Y}_{Str}]
+    \leq Var[\overline{Y}] \space \space where \space \space \overline{Y} = \frac{1}{nm} \sum_{i=1}^{nm} f(Z_i)$$
+
+## 1.3.Control Variates
+
+To estimate $E[Y] = E[f(Z)]$ using Monte Carlo: Generate iid
+$Z_i \sim N(0,1)$ and use
+$\overline{Y} = \frac{1}{n}\sum_{i=1}^n Y_i = \frac{1}{n}\sum_{i=1}^n f(Z_i)$
+where $f(\cdot)$ represents the option's discounted payoff.
+
+Assume we have another option with payoff $g(\cdot)$ Known price
+$E[X] = E[g(Z)]$.
+
+Idea: Use the same random variates to estimate both $E[Y]$ and $E[X]$,
+but adjust $\overline{Y}$ to take into account the error of estimate
+$\overline{X}$. e.g. if $\overline{X}$ underestimate $E[X]$, then
+increase $\overline{Y}$
+
+-   Adjusted $\overline{Y}$ for estimation error $\overline{X} - E[X]$
+    linearly, as
+    $\overline{Y}(b) = \overline{Y} - b\left(\overline{X} - E[X]\right)$,
+    where $b$ is the control coefficient
+
+-   $\overline{Y}(b)$ is unbiased for any $b$ (provided
+    $\overline{Y}, \overline{X}$ are unbiased)
+
+-   $\mathbb{V}(\overline{Y}(b)) = \frac{1}{n}\left[\sigma_Y^2 + b^2\sigma_X^2 - 2b\sigma_{XY}\right]$
+
+-   Optimal Coefficient : $b^* = \frac{Cov[X, Y]}{Var[X]}$
+
+-   In practice, when $Cov[X,Y]$ and $Var[X]$ are unknown, we estimate
+    b\* using MC sample:
+    $\hat{b} = \frac{\sum_{i=1}^n (X_i - \overline{X})(Y_i - \overline{Y})}{\sum_{i=1}^n (X_i - \overline{X})^2}$
+
+-   The optimal variance is:
+    $Var[\overline{Y}(b^*)] = Var[\overline{Y}](1 - \rho_{XY}^2)$, where
+    $\rho_{XY}$ is the correlation between $X$ and $Y$. Good control
+    variates have high absolute correlation with option payoff (high
+    $|\rho_{XY}|$)
+
+```{r}
+BSprice=function(S, X, r, M, v){ # Black-Scholes model
+  d1 <- (log(S/X)+(r+0.5*v^2)*M)/(v*sqrt(M))
+  d2 <- d1-v*sqrt(M)
+  call.pr= S*pnorm(d1) - X*exp(-r*M)*pnorm(d2)
+  put.pr=X*exp(-r*M) * pnorm(-d2) - S*pnorm(-d1)
+  return(cbind(call.pr,put.pr)) 
+}
+(exact_price=BSprice(S0,K,r,M,v)[1]) 
+```
+
+MC & Control Variates
+
+```{r}
+
+# European call, with final asset price as control
+
+n = 10000         # Number of simulations
+r = 0.05          # Risk-free rate
+v = 0.2           # Volatility
+S0 = 100          # Initial asset price
+K = 100           # Strike price
+M = 0.5           # Time to maturity in years (6 months)
+
+Z=rnorm(n) 
+
+X=S0*exp( (r-v^2/2)*M + Z*v*sqrt(M) ) # control variate values
+EX=S0*exp(r*M) # control variate mean
+
+Y=pmax(X-K,0)*exp(-r*M) # payoff values (euro call)
+rho_XY=cor(X,Y) # correlation between X and Y
+b=sd(Y)/sd(X)*rho_XY # optimal b coefficient
+
+Ybar=mean(Y) # Simple MC estimate
+Ybar_cv=Ybar-b*(mean(X)-EX) # Control variate estimate
+
+Ysde=sd(Y)/sqrt(n) # Simple MC std error
+Ysde_cv=Ysde*sqrt((1-rho_XY^2)) # Control variate std error
+
+print(paste("Simple MC | estimate:",Ybar, "| std error",Ysde))
+print(paste("Control variate | estimate:", Ybar_cv,"| std error:",Ysde_cv))
+```
+
+```{r}
+
+plot(X, Y, pch=16, cex=.6, col=1,ylim=c(-10,70), main="Control Variate for European Call Option",xlab="Final Asset Price (X)", ylab="Discounted Payoff (Y)")
+abline(lm(Y~X), col=2, lwd=2)
+abline(v=EX, h=Ybar_cv, col=3,lty=2)
+legend("topleft",legend=c("Simulated Payoffs", "Regression Line", "EX & Ybar_cv Lines"),col=c(1,2, 3),pch=c(16, NA, NA),lty=c(NA, 1, 2),lwd=c(NA, 2, 1),pt.cex=c(0.6, NA, NA),bty="n")
+```
+
+## 1.4.Importance Sampling
+
+Idea: attempt to reduce variance by **changing the distribution
+(probability measure)** from which paths are generated. Change measure
+to give more weight to important outcomes, thereby increasing sample
+efficiency. E.g. for European call, put more weight to paths with
+positive payoff (i.e. for which we exercise). Performance of importance
+sampling relies heavily on equivalent measure being used.
+
+phi: $\varphi$ \| psi: $\psi$
+
+We want to estimate:
+$\alpha = E_\varphi [f(Z)] = \int_z f(z)\varphi(z)dz$, where
+$\varphi(z)$ is the probability density function (pdf) of $Z$ (Normal in
+our case).
+
+-   Simple MC: Generate i.i.d. samples from $\varphi$: and compute the
+    simple estimator: $\hat{\alpha} = \frac{1}{n}\sum_{i=1}^n f(Z_i)$
+
+-   Assume you have sample $Z_i' \sim^{iid} \psi, \quad i=1,\ldots,n$
+    from new pdf $\psi$, can still estimate $\alpha$ as follows:
+    $\alpha = \int_z f(z)\varphi(z)dz = \int_z f(z) \frac{\varphi(z)}{\psi(z)} \psi(z)dz = E_\psi \left[f(Z') \frac{\varphi(Z')}{\psi(Z')}\right] => \hat{\alpha}' = \frac{1}{n} \sum_{i=1}^n f(Z_i') \frac{\varphi(Z_i')}{\psi(Z_i')}$
+
+-   The importance sampling estimator:
+    $\hat{\alpha}' = \frac{1}{n}\sum_{i=1}^{n}f(Z_i') \frac{\varphi(Z_i')}{\psi(Z_i')}$
+    is unbiased for $\alpha = E_\varphi[f(Z)]$ when the simple MC
+    estimator $\hat{\alpha}$ is unbiased.
+
+    -   $E_{\psi}[\hat{\alpha}'] = E_{\psi}\left[\frac{1}{n}\sum_{i=1}^{n}f(Z_i') \frac{\varphi(Z_i')}{\psi(Z_i')}\right] = \frac{1}{n}\sum_{i=1}^{n}E_{\psi}\left[f(Z_i') \frac{\varphi(Z_i')}{\psi(Z_i')}\right]= \int_{-\infty}^{\infty}f(z')\frac{\varphi(z')}{\psi(z')}\psi(z')dz'$
+
+        $= \int_{-\infty}^{\infty}f(z')\varphi(z')dz' = E_{\varphi}[f(Z)] = \alpha$
+
+-   The variance of $\hat{\alpha}'$ is:
+    $Var_{\psi}[\hat{\alpha}'] = Var_{\psi}\left[\frac{1}{n}\sum_{i=1}^{n}f(Z_i') \frac{\varphi(Z_i')}{\psi(Z_i')}\right] = \frac{1}{n}Var_{\psi}\left[f(Z') \frac{\varphi(Z')}{\psi(Z')}\right]$
+
+    $= \frac{1}{n}\left\{E_{\psi}\left[f^2(Z')\frac{\varphi^2(Z')}{\psi^2(Z')}\right] - \alpha^2\right\}$
+
+-   The importance sampling estimator $\hat{\alpha}'$ has lower variance
+    than the standard Monte Carlo estimator $\hat{\alpha}$ if and only
+    if:
+    $E_{\varphi} \left[ f^2(Z) \frac{\varphi(Z)}{\psi(Z)} \right] \leq E_{\varphi} \left[ f^2(Z) \right]$
+
+-   $Var_{\psi}[\hat{\alpha}'] = 0 \quad \text{if} \quad \psi(z) \propto f(z)\varphi(z), \text{ for positive } f(z)$
+    =\> Importance sampling works best when the new pdf $\psi$
+    "resembles" the product of payoff and original density
+    $f \times \varphi$.
+
+**Code Example**
+
+-   Consider deep out-of-the-money European call; e.g. S0 = 65, K=65.
+    With simple MC, generate final prices as
+    $S_T = S_0 e^{Z}, \quad \text{where } Z \sim \varphi = N\left(\left(r - \frac{\sigma^2}{2}\right)T, \sigma^2 T\right)$
+
+-   What would be a good candidate for $\psi$?
+
+    $\psi_1 = N\left(\log\left(\frac{90}{50}\right) - \frac{\sigma^2}{2}T, \sigma^2 T\right)$
+    or
+    $\psi_2 = N\left(\log\left(\frac{30}{50}\right) - \frac{\sigma^2}{2}T, \sigma^2 T\right)$
+
+    For the first, the option will likely end up in the money.
+
+Here, because the option is deep out-of-the-money, the probability of a
+payoff is small, making vanilla Monte Carlo inefficient (rare payoff
+events =\>high variance). Importance Sampling addresses this by biasing
+the sampling toward more “relevant” outcomes.
+
+```{r}
+##### 
+# Importance Sampling
+
+n = 10000         # Number of simulations
+r = 0.02          # Risk-free rate
+v = 0.2           # Volatility
+S0 = 50           # Initial asset price
+K = 65            # Strike price (note: quite a bit above S0 — deep OTM)
+M = 1             # Time to maturity in years (6 months)
+
+
+## Plots log return Z. where Z~Nomral
+z=seq(-.5,1.5,by=.001)
+
+# Plot density under risk-neutral measure (distr. )
+plot(z, dnorm(z, mean=(r - v^2/2) * M, sd=v * sqrt(M)), type='l', lwd=2)
+
+# Scaled payoff
+lines(z, pmax(S0 * exp(z) - K, 0)/S0, col=2, lwd=2)
+
+# Product of density and scaled payoff (phi * payoff)
+lines(z, dnorm(z, mean=(r - v^2/2) * M, sd=v * sqrt(M)) * pmax(S0 * exp(z) - K, 0)/2, col=4, lwd=2)
+
+# Density under importance sampling measure (psi distr.)
+lines(z, dnorm(z, mean=log(90/S0) - v^2/2 * M, sd=v * sqrt(M)), col=3, lwd=2)
+lines(z, dnorm(z, mean=log(30/S0) - v^2/2 * M, sd=v * sqrt(M)), col=5, lwd=2)
+
+
+legend("topright", legend = c("phi(Z)", "Scaled payoff f(Z)",
+"phi(Z)*f(Z)", "psi1(Z) with 90","psi2(Z) with 30"), col = c(1, 2, 4, 3,5), lwd = 2, cex = 0.8)
+```
+
+```{r}
+
+# similarly to previous plot, but in terms of final asset price. ST ~ LogNormal
+
+s=seq(30,120,by=.1) 
+
+# Plot density under risk-neutral measure (phi dist. )
+plot( s, dlnorm(s/S0,meanlog=(r-v^2/2)*M,sdlog=v*sqrt(M))*13, 
+      xlab="", ylab="", type='l', lwd=2)
+
+# Scaled payoff
+lines(s, pmax(s - K, 0), col = 2, lwd = 2)
+
+# Product of density and payoff (phi * payoff)
+lines( s, dlnorm(s/S0,meanlog=(r-v^2/2)*M,sdlog=v*sqrt(M))*pmax(s-K,0)*10, lwd=2, col=4 ) 
+
+# Importance sampling density (psi distr.)
+lines( s, dlnorm(s/S0,meanlog=log(90/S0)-v^2/2*M,sdlog=v*sqrt(M))*13, 
+       xlab="", ylab="", type='l', lwd=2, col=3)
+lines( s, dlnorm(s/S0,meanlog=log(30/S0)-v^2/2*M,sdlog=v*sqrt(M))*13, 
+       xlab="", ylab="", type='l', lwd=2, col=5)
+
+legend("topright", legend = c("phi(ST) (Lognormal)","Call payoff - f(ST) = (ST-K)+", "phi(ST)*f(ST)","psi1(ST)with90","psi2(ST)with30"),col = c(1, 2, 4, 3,5), lwd = 2, cex = 0.8)
+
+```
+
+```{r}
+# Simulation 
+
+mu.phi=(r-v^2/2)*M; sig.phi=v*sqrt(M)
+mu.psi=log(90/50)-v^2/2*M; sig.psi=sig.phi 
+Z=rnorm(n)
+
+# Simple MC (sample from the true (phi dist.) and compute discounted payoff)
+Z.phi=mu.phi+Z*sig.phi # log-returns
+S.phi=S0*exp(Z.phi) # asset prices
+payoff.phi=pmax(S.phi-K,0)*exp(-r*M)
+MC.mean=mean(payoff.phi)
+MC.sde=sd(payoff.phi)/sqrt(n)
+
+# Importance Sampling
+Z.psi=mu.psi+Z*sig.psi # generate Z under psi measure
+S.psi=S0*exp(Z.psi) # final prices under psi measure
+mean(S.psi) # confirm mean of final prices under psi is ~90
+payoff.psi=pmax(S.psi-K,0)*exp(-r*M)
+ratio=dnorm(Z.psi,mu.phi,sig.phi)/dnorm(Z.psi,mu.psi,sig.psi) # pdf ratio
+IS.mean=mean(payoff.psi*ratio)
+IS.sde=sd(payoff.psi*ratio)/sqrt(n)
+
+
+print(paste("Simple MC | estimate:",MC.mean, "| std error",MC.sde))
+print(paste("Importance Sampling | estimate:", IS.mean,"| std error:",IS.sde))
+```
+
+Recall, the exact price is:
+
+```{r}
+(exact_price=BSprice(S0,K,r,M,v)[1])
+```
+
+# 2.Gap Call Option Monte Carlo Simulation
+
+A European gap option has a strike price K1 and a trigger price K2. The
+trigger price determines whether or not the gap option is exercised,
+while the strike price determines the amount of the payoff. For example,
+the European gap call option has payoff given by:
+
+$\text{Payoff} =
+\begin{cases}
+S_T - K_1, & \text{if } S_T \geq K_2 \\
+0, & \text{if } S_T < K_2
+\end{cases}$ ; Obviously, if the strike price is equal to the trigger
+price then the gap option is an ordinary option. Note that gap options
+can result in negative payoff at expiration (so they should not really
+be called “options”). Moreover, gap options are different from barrier
+options, in that for barrier options the barrier can be reached prior to
+expiration, whereas for gap options only the final stock price is
+compared to the trigger.
+
+The stock price follows:
+$$ S_T = S_0 e^{Z}, \quad Z \sim N\left(\left(r - \frac{\sigma^2}{2}\right)T, \sigma^2 T\right) $$Discount
+factor: $e^{-rT}$
+
+## 2.1.Basic Monte Carlo Estimation
+
+Estimate the price of a European gap call option with: - $S_0 = 55$ -
+$K_1 = 50$ - $K_2 = 60$ - $T = 1 \text{ yr}$ - $r = 2\%$ -
+$\sigma = 20\%$. Assuming the price follows Geometric Brownian Motion
+(GBM). Use $n = 100,\!000$ paths and calculate the standard error of
+your result. Compare that to the exact price of 6.129964.
+
+```{r}
+
+n=100000; S0=55; K1=50; K2=60; M=1; r=.02; v=.2
+
+Z=rnorm(n)
+ST=S0*exp( (r-v^2/2)*M + v*sqrt(M)*Z)
+payoff_2a=exp(-r*M)*(ST-K1)*(ST>K2)
+
+(mean_2a=mean(payoff_2a))
+(se_2a=sd(payoff_2a)/sqrt(n))
+
+```
+
+## 2.2.Antithetic Variables
+
+Repeat using antithetic variables, and report: New price estimate and
+Standard error
+
+```{r}
+n=100000; S0=55; K1=50; K2=60; M=1; r=.02; v=.2
+
+Z=rnorm(n/2); Z=cbind(Z,-Z)
+ST=S0*exp( (r-v^2/2)*M + v*sqrt(M)*Z)
+payoff_2b=rowMeans(exp(-r*M)*(ST-K1)*(ST>K2))
+(mean_2b=mean(payoff_2b))
+(se_2b=sd(payoff_2b)/sqrt(n))
+```
+
+## 2.3.Stratified Sampling
+
+Repeat using stratification with: $m = 5,10, 20$ equiprobable strata.
+Report for each case: New price estimate and Standard error
+
+```{r, warning=FALSE}
+
+n=100000; S0=55; K1=50; K2=60; M=1; r=.02; v=.2
+
+m.all=c(5,10,20) #<<------||
+mean_2c=se_2c=rep(0,length(m.all))
+for(i in 1:length(m.all)){
+  m=m.all[i]; nj=n/m
+  Z=matrix(0,nj,m)
+  for(j in 1:m){
+    temp=runif(nj,(j-1)/m,j/m)
+    Z[,j]=qnorm(temp)
+  } 
+  ST=S0*exp( (r-v^2/2)*M + v*sqrt(M)*Z ) #<<------||
+  payoff_2c=exp(-r*M)*(ST-K1)*(ST>K2) #<<------||
+  mean_2c[i]=mean( colMeans(payoff_2c) )
+  se_2c[i]=sqrt( sum( apply(payoff_2c,2,var)/nj ) )/m 
+}
+cbind( mean_2c, se_2c)
+```
+
+# 3.Forward Start European Call Option
+
+A forward start option is an option that starts at a specified future
+date with an expiration date set even further in the future.
+
+-   For example, consider a forward start call option with start date in
+    1yr and expiration date in 2yrs:
+
+    -   at t = 0 you pay the option premium, and at t = 1 you receive a
+        European call option with expiration date t = 2 and strike price
+        K = S1 (this is called an at-the-money forward start call,
+        because the strike price is set to be the asset price at t = 1,
+        which is unknown at t = 0).
+
+## 3.1.Basic Monte Carlo Estimation
+
+Estimate the price of an at-the-money forward start European call option
+with $T_{\text{exp}} = 2\text{yr}$, $r = 2\%$, $\sigma = 20\%$ and
+assuming the price follows GBM. Use $n = 10,000$ paths and calculate the
+standard error of your result. You should use the Black- Scholes formula
+to explicitly calculate the value of the option at $T_{\text{start}}=1$
+, i.e. you should generate $S_1$ and then calculate its “payoff” as the
+Black-Scholes price of a European at-the-money call option with 1 year
+to maturity. Compare that to the exact price of 6.241225.
+
+```{r}
+
+n=10000; S0=70; Tstart=1; Texp=2; r=.02; v=.2
+
+Z=rnorm(n)
+STstart=S0*exp( (r-v^2/2)*Tstart + v*sqrt(Tstart)*Z )
+payoff_3a = exp(-r*Tstart) * BSprice(STstart, STstart, r, Texp-Tstart, v)[,1]
+(mean_3a=mean(payoff_3a)) # MC estimate
+(se_3a=sd(payoff_3a)/sqrt(n))
+```
+
+## 3.2.Antithetic Variables
+
+Repeat using antithetic variables, and report the new price estimate and
+standard error
+
+```{r}
+n=10000; S0=70; Tstart=1; Texp=2; r=.02; v=.2
+
+Z=rnorm(n/2); Z.a=-Z
+STstart=S0*exp( (r-v^2/2)*Tstart + v*sqrt(Tstart)*Z )
+STstart.a=S0*exp( (r-v^2/2)*Tstart + v*sqrt(Tstart)*Z.a ) # antithetic path
+payoff=exp(-r*Tstart) * BSprice(STstart, STstart, r, Texp-Tstart, v)[,1]
+payoff.a=exp(-r*Tstart) * BSprice(STstart.a, STstart.a, r, Texp-Tstart, v)[,1] # antithetic path payoff
+payoff_3b=(payoff+payoff.a)/2
+(mean_3b=mean(payoff_3b)) # MC estimate
+(se_3b=sd(payoff_3b)/sqrt(length(payoff_3b))) # std. error
+```
+
+## 3.3.Stratification Sampling
+
+Repeat part using stratification with equiprobable strata, and report
+the new price estimate and standard error.
+
+```{r}
+n=10000; S0=70; Tstart=1; Texp=2; r=.02; v=.2
+
+m=10; nj=n/m  # Samples per stratum
+Z=STstart=payoff_3c=matrix(0,nj,m)
+for(j in 1:m){
+  temp=runif(nj,(j-1)/m,j/m) # Uniforms in [ (j-1)/m, j/m ]
+  Z[,j]=qnorm(temp) # Map to standard normal via inverse CDF
+  STstart[,j]=S0*exp( (r-v^2/2)*Tstart + v*sqrt(Tstart)*Z[,j] ) # Asset at Tstart
+  payoff_3c[,j]=exp(-r*Tstart) * BSprice(STstart[,j], STstart[,j], r, Texp-Tstart, v)[,1]
+} 
+(mean_3c=mean( colMeans(payoff_3c) ) )
+(se_3c=sqrt( sum( apply(payoff_3c,2,var)/nj ) )/m )
+```
+
+Repeat using stratification with: $m = 5,10, 20$ equiprobable strata.
+Report for each case: New price estimate and Standard error
+
+```{r}
+
+n=10000; S0=70; Tstart=1; Texp=2; r=.02; v=.2
+m.all = c(5, 10, 20)
+
+mean_3c = se_3c = rep(0, length(m.all))
+for (i in 1:length(m.all)) {
+  m = m.all[i]; nj = n / m
+  Z = matrix(0, nj, m); ST = matrix(0, nj, m)
+  payoff_3c = matrix(0, nj, m)
+  for (j in 1:m) {
+    temp = runif(nj, (j-1)/m, j/m)
+    Z[,j] = qnorm(temp)
+  }
+
+  # Simulate ST at Tstart
+  ST = S0 * exp((r - v^2/2) * Tstart + v * sqrt(Tstart) * Z)
+
+  # Forward-start call payoff: BS price at Tstart, strike = ST
+  for (j in 1:m) {
+    payoff_3c[,j] = exp(-r * Tstart) * BSprice(ST[,j], ST[,j], r, Texp - Tstart, v)[,1]
+  }
+
+  mean_3c[i] = mean(colMeans(payoff_3c))
+  se_3c[i] = sqrt(sum(apply(payoff_3c, 2, var) / nj)) / m
+}
+
+cbind(mean_3c, se_3c)
+
+```
+
+## 3.4.Analytical Solution
+
+Show that the price of the at-the-money forward call option is actually
+a simple linear function of $S_0$
+
+Hint: Use risk-neutral pricing and express the payoff at
+$T_{\text{start}}$ as the Black-Scholes price of an ATM call with
+maturity $T > T_{\text{start}}$
+
+```{r}
+Dt=Texp-Tstart
+d1=(r/v+v/2)*sqrt(Dt)
+d2=(r/v-v/2)*sqrt(Dt)
+(exact_price=S0*( pnorm(d1) - exp(-r*Dt)*pnorm(d2) ))
+```
+
+# 4.a-Quantile Option Pricing
+
+An $\alpha$-quantile option is an option whose payoff is determined by
+the $\alpha$th quantile of the underlying price from time 0 until
+expiration. For example, the median call option (i.e., $\alpha=50\%$)
+with strike $K$ has payoff
+$\left(\text{median}\left\{S_t\right\}_{t=0}^T-K\right)_+$, where median
+$\left\{S_t\right\}_{t=0}^T$ is the median asset price over $[0,T]$.
+Assume that the underlying asset follows GBM with $S_0 = 60$, $r = 5\%$,
+$\sigma = 25\%$, and use simulation to estimate the price of median call
+with $K = 70$ & $T = 1$.
+
+## 4.1.Path discretization - Simple Monte Carlo
+
+Perform simple Monte Carlo using path discretization with $t_j = j*T/m$,
+$j = 0,\ldots,m$ and $m = 50$ in order to approximate the continuous
+median $\left\{S_t\right\}_{t=0}^T$ by the discrete median
+$\left\{S(t_j)\right\}_{j=0}^m$. Use $n = 10,000$ paths and report:
+Price estimate and Standard error of the estimate
+
+-   `S0*exp((r-v^2/2)*M+v*sqrt(M)*Z)` : Simulates the asset price at a
+    single future time M. It assumes no intermediate steps — just jump
+    directly from t=0 to t=M
+
+-   `S = S0 * exp(t(apply((r - v^2/2)*Dt + Z*v*sqrt(Dt), 1, cumsum)))`:
+    Simulates the entire path of the asset price over multiple time
+    steps $\Delta t =M/m$, where m is the number of steps.
+    $(r - \frac{1}{2} v^2) \Delta t + v \sqrt{\Delta t} Z_t$
+
+    -   At each time step $t_i$, simulate:
+
+        $\log(S_{t_i}) = \log(S_{t_{i-1}}) + \left( r - \frac{1}{2} v^2 \right) \Delta t + v \sqrt{\Delta t} Z_i$
+
+        Taking the cumulative sum and exponentiating gives the entire
+        path:
+
+        $S_t = S_0 \cdot \exp \left( \sum_{i=1}^t \left( (r - \frac{1}{2} v^2) \Delta t + v \sqrt{\Delta t} Z_i \right) \right)$
+
+-   `quantile()` function and specify the desired probability level.
+
+```{r}
+
+S0 = 60       # Initial stock price
+K = 70        # Strike price
+M = 1         # Time to maturity
+r = 0.05      # Risk-free rate
+v = 0.25      # Volatility
+
+n = 10000     # Number of simulated paths
+m = 50        # Number of time steps per path
+Dt = M/m      # Time step size
+
+Z=matrix(rnorm(n*m), n, m) # simulate n*m standard normal for Brownian increments.
+S=S0*exp(t(apply((r-v^2/2)*Dt+Z*v*sqrt(Dt),1,cumsum))) # <<<--------|||
+# q=0.5; quantS = apply(S, 1, quantile, probs = q)
+medS=apply(S,1,median)
+payoff_4a=exp(-r*M)*pmax(medS-K,0) # <<<--------|||
+(mean_4a=mean(payoff_4a))
+(se_4a=sd(payoff_4a)/sqrt(n))
+```
+
+## 4.2.Control Variate (BS price of European Call)
+
+Repeat using the Black-Scholes price of the European call as a control
+variate, and report the new price estimate and standard error
+
+```{r}
+EX=BSprice(S0, K, r, M, v)[1] 
+X=exp(-r*M)*pmax(S[,m]-K,0) # control variate values
+Y=payoff_4a
+
+(rho_XY=cor(X,Y)) # correlation between X and Y
+(b=sd(Y)/sd(X)*rho_XY) # optimal b coefficient
+(mean_4b=mean_4a - b*(mean(X)-EX)) # Control variate estimate
+(se_4b=se_4a*sqrt((1-rho_XY^2))) # Control variate std error
+```
+
+-   `pmax(S[,m]-K,0)`: payoff of a European call option at maturity
+
+```         
+-   `S` is an n × m matrix representing the simulated stock price
+    paths. m is number of steps.
+
+-   `S[,m]` means: the value of each path at the final time step
+```
+
+# 5.Asian option Pricing (average)
+
+An Asian option is an option whose payoff is determined by the
+**average** underlying price over some preset period of time, typically
+the time till expiration. For example, the Asian call option with strike
+$K$ has payoff $(A(0,T)-K)_{+}$, where $A(0,t)$ is the **average asset
+price** over $(0,T)$. There are two types of averaging: $$ \begin{cases}
+\text{arithmetic average}: A(0,T)=\dfrac{1}{T}\int_{0}^{T}S(t)dt \\ 
+\\
+\text{geometric average}: A(0,T)=\exp\left(\dfrac{1}{T}\int_{0}^{T}\ln\left(S(t) \right)dt\right)
+\end{cases} $$ If the underlying asset follows GBM, then the price of an
+Asian option with geometric averaging can be calculated explicitly. For
+Asian options with arithmetic averaging, however, we rely exclusively on
+numerical methods for pricing.
+
+Assume that the underlying asset follows GBM with $S_{0}=70$, $r=5\%$,
+$\sigma=25\%$, and use simulation to estimate the price of an arithmetic
+Asian call with $K=80$ & $T=1$.
+
+## 5.1.path discretization - Simple Monte Carlo
+
+Perform simple Monte Carlo using path discretization with $m = 50$ in
+order to approximate\
+$A(0, T) = \frac{1}{T} \int_{0}^{T} S(t) dt$ by
+$\tilde{A}(0, T) = \frac{1}{m} \sum_{j=1}^{m} S(t_{i})$. Use
+$n = 10,000$ paths and report: Price estimate and Standard error of the
+estimate
+
+```{r}
+set.seed(12345)
+S0 = 70       # Initial stock price
+K = 80        # Strike price
+M = 1         # Time to maturity
+r = 0.05      # Risk-free rate
+v = 0.25      # Volatility
+
+n = 10000     # Number of simulated paths
+m = 50        # Number of time steps per path
+Dt = M/m      # Time step size
+
+Z=matrix(rnorm(n*m), n, m) # simulate n*m standard normal for Brownian increments.
+S=S0*exp(t(apply((r-v^2/2)*Dt+Z*v*sqrt(Dt),1,cumsum))) # <<<--------|||
+# q=0.5; quantS = apply(S, 1, quantile, probs = q)
+meanS=apply(S,1,mean) # meanS=rowMeans(S)
+payoff_5a=exp(-r*M)*pmax(meanS-K,0) # <<<--------|||
+(mean_5a=mean(payoff_5a))
+(se_5a=sd(payoff_5a)/sqrt(n))
+```
+
+## 5.2.Control Variate Approach
+
+Control Variate Approach Repeat using the price of the geometric Asian
+call as a control variate, and report: Price estimate and Standard error
+of the estimate. Note: The exact price of the geometric Asian option is
+1.271969.
+
+```{r}
+
+EX=1.271969 # Control variate - exact Geom. Asian call price
+A.geom=exp(rowMeans(log(S)))
+X=exp(-r*M)*pmax(A.geom-K,0) # control variate values
+Y=payoff_5a
+
+(rho_XY=cor(X,Y)) # correlation between X and Y
+(b=sd(Y)/sd(X)*rho_XY) # optimal b coefficient
+
+(mean_5b=mean_5a - b*(mean(X)-EX)) # Control variate estimate
+(se_5b=se_5a*sqrt((1-rho_XY^2))) # Control variate std error
+```
+
+## 5.3.Importance Sampling
+
+Repeat using importance sampling: Change the probability measure so that
+$E[S_T] = K$ and Experiment with at least two more measure changes of
+your choice. Report for each case: New price estimate and Standard error
+of the estimate.
+
+=\> New drift $= \frac{\log(K/S_0)}{M}$;
+$E[S_T] = K = S_0 \cdot e^{\text{new drift} \cdot M}$
+
+```{r}
+
+MEANS=c(80,90,100) # different importance sampling drift
+mean_5c=se_5c=rep(0,length(MEANS))
+
+
+for(i in 1:length(MEANS)){
+  new.r=log(MEANS[i]/S0)/M # new drift
+  ZZ=(new.r-v^2/2)*Dt+Z*v*sqrt(Dt) # simulates log-returns under new drift
+  S=S0*exp(t(apply(ZZ,1,cumsum))) # matrix of simulated stock paths over time
+  A=rowMeans(S) # Arithmetic average of each path (used in payoff)
+  log.ratio=dnorm(ZZ,(r-v^2/2)*Dt,v*sqrt(Dt),log=TRUE)-dnorm(ZZ,(new.r-v^2/2)*Dt,v*sqrt(Dt),log=TRUE) # Likelihood ratio (Radon-Nikodym derivative)
+  prod.ratio=exp( rowSums(log.ratio) ) 
+  payoff=exp(-r*M)*pmax(A-K,0)*prod.ratio # payoff under importance sampling
+  mean_5c[i]=mean(payoff)
+  se_5c[i]=sd(payoff)/sqrt(n)
+}
+
+cbind(mean_5c, se_5c)
+```
+
+-   `dnorm(x, mean = mu, sd = sigma, log = TRUE)`: In R, the `dnorm()`
+    function computes the probability density function (PDF) of the
+    normal distribution. When you set `log=TRUE`, it returns the
+    logarithm of the density instead of the raw density value.
+
+    -   This equivalent to :
+        `log(1 / (sqrt(2 * pi) * sigma) * exp(- (x - mu)^2 / (2 * sigma^2)))`
+        which simplifies to
+        `-0.5 * log(2 * pi) - log(sigma) - (x - mu)^2 / (2 * sigma^2)`
